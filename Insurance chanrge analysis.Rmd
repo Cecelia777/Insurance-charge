@@ -1,0 +1,754 @@
+---
+title: "Multiple Linear Regression Analysis of Insurance Charges and Other Significant Variables"
+subtitle: <center><h1>Analysis of Insurance Charges</h1></center>
+author: <center>Cecelia Fu<center>
+output: pdf_document
+---
+
+<style type="text/css">
+h1.title {
+  font-size: 40px;
+  text-align: center;
+}
+</style>
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(car)
+library(ggfortify)
+library(bestglm)
+library(glmnet)
+library(corrplot)
+library(dplyr)
+sz <- 20
+```
+
+## Background Information and Analysis
+
+insurance data set info/ mini story
+
+
+Variable | Description
+-------- | -------------
+Age      | How old the person who filed for insurance is.
+Sex      | Gender of the person.
+BMI      | The BMI index of the person that filed.
+Children | The number of children the person has.
+Smoker   | A variable identifying if they smoked or not.
+Region   | The general geographic are where the person lives.
+
+
+
+
+#### Read in the dataset.
+```{r read_data, include=FALSE}
+insurance <- read.csv("insurance.csv", header = TRUE)
+
+```
+
+#### Introduction
+Insurance charges can be confusing, since there are lots of factors can contribute to charges. Information in this insurance charges dataset include individual's age, sex, bmi, number of children, region and insurance charges. The purpose of this analysis is to determine what factors would affect or predict the insurance charge, where these factors have positive or negative linear relationship with charge. The solution of the analysis would identify what factors can influence insurance charge, and also help consumers make better decision about their health. 
+
+#### Method
+According to the data character, the multiple linear regression is applied. To start, I apply the shrinkage method to select which explanatory vairables can use to predict insurance charges; Then fit multiple linear regression model and check assumptions. When assumptions are not met, apply appropriate transformation to re-check assumptions. 
+
+
+\newpage
+
+## Exploratory analysis:
+
+#### Start by looking at a summary of our data, making a scatter plot matrix of th continuous variables, and look at side by side boxplots for the categorical variables.
+```{r}
+# Look at a summary of the data to make sure that it makes sense.
+summary(insurance)
+
+# Subset the data to make a scatter plot matrix of all the continuous variables
+cont.insurance <- select(insurance, c("age", "bmi", "charges"))
+plot(cont.insurance, pch = 19)
+
+# Make a correlation matrix of the continuous variables.
+cor(cont.insurance)
+
+# Boxplots of all other categorical variables to get an idea of what is going on.
+box.sex <- ggplot(data = insurance, 
+                  mapping = aes(x = sex, y = charges)) +
+    geom_boxplot() +
+    theme(aspect.ratio = 1)
+box.sex
+
+insurance$children <- as.factor(insurance$children)
+box.children <- ggplot(data = insurance, 
+                       mapping = aes(x = children, y = charges)) +
+    geom_boxplot() +
+    theme(aspect.ratio = 1)
+box.children
+
+
+box.smoker <- ggplot(data = insurance, 
+                     mapping = aes(x = smoker, y = charges)) +
+    geom_boxplot() +
+    theme(aspect.ratio = 1)
+box.smoker
+
+
+box.region <- ggplot(data = insurance, 
+                     mapping = aes(x = region, y = charges)) +
+    geom_boxplot() +
+    theme(aspect.ratio = 1)
+box.region
+
+
+
+```
+
+## Shrinkage Methods
+
+#### Next apply shrinkage methods to the data to see if all of the categorical variables are relevant to this model.
+```{r}
+#Convert all variables to factors or numerical.
+insurance$children <- as.factor(insurance$children)
+insurance$sex <- as.factor(insurance$sex)
+insurance$smoker <- as.factor(insurance$smoker)
+insurance$region <- as.factor(insurance$region)
+```
+
+
+#### Best Subsets:
+```{r}
+best.subsets.bic <- bestglm(insurance,
+                            IC = "BIC",
+                            method = "exhaustive",
+                            TopModels = 10)
+
+summary(best.subsets.bic$BestModel)
+
+```
+
+#### Forward Selection:
+```{r}
+forward.aic <- bestglm(insurance,
+                            IC = "AIC",
+                            method = "forward",
+                            TopModels = 10)
+
+summary(forward.aic$BestModel)
+```
+
+
+#### Backward Selection:
+```{r}
+backward.aic <- bestglm(insurance,
+                      IC = "AIC",
+                      method = "backward",
+                      TopModels = 10)
+
+summary(backward.aic$BestModel)
+```
+
+#### Sequential Replacement:
+```{r}
+seqrep.aic <- bestglm(insurance,
+                      IC = "AIC",
+                      method = "seqrep",
+                      TopModels = 10,
+                      t=100)
+summary(seqrep.aic$BestModel)
+```
+
+(This code alters the way the data is presented so lasso and elastic net can run accurately.)
+```{r}
+#Convert elements to be represented as numbers and then change them to be factors
+insurance <- read.csv("insurance.csv", header = TRUE)
+insurance$smoker <- ifelse(insurance$smoker == "no", 0, 1)
+insurance$sex <- ifelse(insurance$sex == "female", 0, 1)
+
+for(i in 1:length(insurance$region)){
+  if(insurance[i, 6] == "southwest"){
+    insurance[i, 6] <- 1
+  } else if(insurance[i, 6] == "northwest"){
+    insurance[i, 6] <- 2
+  } else if(insurance[i, 6] == "northeast"){
+    insurance[i, 6] <- 3
+  } else if(insurance[i, 6] == "southeast"){
+    insurance[i, 6] <- 4
+  }
+}
+
+#Make sure continuous variables are continuous
+insurance$age <- as.numeric(insurance$age)
+insurance$bmi <- as.numeric(insurance$bmi)
+
+#Convert all categorical variables back to factors.
+insurance$sex <- as.factor(insurance$sex)
+insurance$children <- as.factor(insurance$children)
+insurance$smoker <- as.factor(insurance$smoker)
+insurance$region <- as.factor(insurance$region)
+```
+
+#### Lasso:
+```{r}
+# make a matrix for our covariates and pull out response as its own variable
+insurance.x <- data.matrix(insurance[, c(1:6)])
+insurance.y <- insurance[, 7]
+
+# Lasso (alpha = 1)
+insurance.lasso <- glmnet(x = insurance.x, y = insurance.y, alpha = 1)
+
+# use cross validation to pick the "best" lambda (based on MSE)
+insurance.lasso.cv <- cv.glmnet(x = insurance.x, y = insurance.y, 
+                          type.measure = "mse", alpha = 1)
+
+# lambda.min is the value of lambda that gives minimum mean cross-validated 
+# error
+insurance.lasso.cv$lambda.min
+# lambda.1se gives the most regularized model such that error is within one 
+# standard error of the minimum
+insurance.lasso.cv$lambda.1se
+
+# coefficients (betas) using a specific lambda penalty value
+coef(insurance.lasso.cv, s = "lambda.min")
+coef(insurance.lasso.cv, s = "lambda.1se")
+```
+
+#### Elastic Net:
+```{r}
+# make a matrix for our covariates and pull out response as its own variable
+insurance.x <- data.matrix(insurance[, 1:6])
+insurance.y <- insurance[, 7]
+
+# Elastic Net (alpha = .5)
+insurance.elastic <- glmnet(x = insurance.x, y = insurance.y, alpha = .5)
+
+# use cross validation to pick the "best" lambda (based on MSE)
+insurance.elastic.cv <- cv.glmnet(x = insurance.x, y = insurance.y, 
+                          type.measure = "mse", alpha = .5)
+
+# lambda.min is the value of lambda that gives minimum mean cross-validated 
+# error
+insurance.elastic.cv$lambda.min
+# lambda.1se gives the most regularized model such that error is within one 
+# standard error of the minimum
+insurance.elastic.cv$lambda.1se
+
+# coefficients (betas) using a specific lambda penalty value
+coef(insurance.elastic.cv, s = "lambda.min")
+coef(insurance.elastic.cv, s = "lambda.1se")
+```
+
+#### Evaluation (Which variables are worthy of being included in the analysis.)
+
+
+
+Variable     | Best Subset | Forward | Backward | Sequential Replacement | LASSO  | Elastic Net
+------------ | ----------- | ------- | -------- | ---------------------- | ------ | -----------
+age          |       X     |    X    |    X     |           X            |    X   |      X       
+sex          |             |         |          |                        |        |
+bmi          |       X     |    X    |    X     |           X            |    X   |      X
+children     |             |    X    |    X     |           X            |        |      
+smoker       |       X     |    X    |    X     |           X            |        |        
+region       |             |    X    |    X     |           X            |        |       
+
+
+
+Based on the results from all of the shrinkage methods, I think it's best to take four of the original six variables which are age, bmi, smoker, and children.  Even though many of them said that region could play somewhat of a factor, I removed it because it doesn't seem logical that the place that you live have as large an impact on your insurance charges as the number of children that you have.  Moving forward I'll use these four variables and apply any necessary transformations later on.
+
+
+## Create a linear model of the data.
+```{r}
+#Read in a fresh set of the data and convert the necessary data to factors
+insurance <- read.csv("insurance.csv", header = TRUE)
+insurance$children <- as.factor(insurance$children)
+insurance$smoker <- as.factor(insurance$smoker)
+
+
+sub.insurance <- insurance[, c(1,3,4,5,7)]
+sub.insurance$children <- as.factor(sub.insurance$children)
+
+sub.insurance.lm <- lm(charges ~ age + bmi + children + smoker, 
+                       data = sub.insurance)
+summary(sub.insurance.lm)
+
+#add residuals and fitted values to dataframe.
+sub.insurance$residuals <- sub.insurance.lm$residuals
+sub.insurance$fitted.values <- sub.insurance.lm$fitted.values
+```
+
+
+## Check Assumptions
+
+#### (L) Assumption 1: X vs. Y is linear (using scatter plots, partial regression plots, residuals vs. fitted values plots, and specific scatter plots that meet certain requirements).
+
+```{r}
+#Scatter plot matrix of continuous variables.
+plot(cont.insurance)
+
+
+#Partial Regression plots
+#Age plot code
+plot.age <- ggplot(data = sub.insurance, 
+                   mapping = aes(x = age, y = residuals)) +
+    geom_point() +
+    theme_bw() +
+    theme(aspect.ratio = 1)
+
+
+#BMI plot code
+plot.bmi <- ggplot(data = sub.insurance, 
+                   mapping = aes(x = bmi, y = residuals)) +
+    geom_point() +
+    theme_bw() +
+    theme(aspect.ratio = 1)
+
+#Children plot code
+plot.children <- ggplot(data = sub.insurance, 
+                        mapping = aes(x = children, y = residuals)) +
+    geom_point() +
+    theme_bw() +
+    theme(aspect.ratio = 1)
+
+#Smoker plot code
+plot.smoker <- ggplot(data = sub.insurance, 
+                      mapping = aes(x = smoker, y = residuals)) +
+    geom_point() +
+    theme_bw() +
+    theme(aspect.ratio = 1)
+
+
+plot.age
+plot.bmi
+plot.children
+plot.smoker
+
+#Residuals vs. fitted values.
+residuals.plot <- autoplot(sub.insurance.lm, which = 1, ncol = 1, nrow = 1) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+residuals.plot
+
+#Specific scatter plots 
+plot(charges ~ age, data = subset(sub.insurance, smoker == "yes"))
+
+#AV Plots
+avPlots(sub.insurance.lm)
+```
+
+#### Assumption 1 Conclusions:
+
+This assumption is still met.  There are 3 distinct lines that are being affected by a number of other variables, but that hasn't changed the linear nature of our data.  I do think that it will become more strongly true through some sort of transformation.
+
+
+#### (I) Assumption 2: Residuals are independent.
+
+Do not know how the data was collected, so I cannot conclusively state that the residuals are independent. My assumption is that the residuals will be independent since the medical conditions and needs of a particular person can't influence the medical conditions and needs of another.
+
+
+#### (N) Assumption 3: Residuals are normally distributed and centered at 0.
+```{r}
+prob.plot <- autoplot(sub.insurance.lm, which = 2, ncol = 1, nrow = 1) +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.title = element_text(size = sz))
+
+prob.plot
+
+shapiro.test(sub.insurance.lm$residuals)
+```
+
+#### Assumption 3 Conclusions:
+
+Normality is not met.  The normal probability plot doesn't follow a straight line, and the Shapiro-Wilk test gave us a p value of basically 0.  This assumption can do better. I will make a transformation of the data and see if it helps the situation.
+
+
+
+#### (E) Assumption 4: Residuals have equal variance.
+```{r}
+residuals.plot
+
+grp <- as.factor(c(rep("lower", floor(dim(insurance)[1] / 2)), 
+                   rep("upper", ceiling(dim(insurance)[1] / 2))))
+leveneTest(sub.insurance[order(sub.insurance$age), 
+                         "residuals"] ~ grp, center = median)
+```
+
+#### Assumption 4 Conclusions:
+
+This assumption is not met.  There is no even spread in the data currently and it looks to be clumped into large groups.  This suggests that there are other predictor variables that we currently don't have access to. I'll still apply a transformation to see if I can get the model to look a little better.
+
+
+#### (A) Assumption 5: Model describes ALL observations.
+```{r}
+#DFFits
+insurance.dffits <- data.frame ("dffits" = dffits(sub.insurance.lm))
+insurance.dffits$obs <- 1:length(sub.insurance$age)
+
+ggplot(data = insurance.dffits) +
+  geom_point(mapping = aes(x = obs, y = abs(dffits))) +
+  geom_hline(mapping = aes(yintercept = 1),
+             color = "red", linetype = 2) +
+  geom_hline(mapping = aes(yintercept = 2 * sqrt(6 / length(obs))),
+             color = "red", linetype = 2) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+insurance.dffits[abs(insurance.dffits$dffits) > 1, ]
+
+
+#DFBetas
+insurance.dfbetas <- as.data.frame(dfbetas(sub.insurance.lm))
+insurance.dfbetas$obs <- 1:length(sub.insurance$age)
+
+
+ggplot(data = insurance.dfbetas) +
+  geom_point(mapping = aes(x = obs, y = abs(age))) +
+  geom_hline(mapping = aes(yintercept = 1),
+             color = "red", linetype = 2) +
+  geom_hline(mapping = aes(yintercept = 2 / sqrt(length(obs))),
+             color = "red", linetype = 2) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+ggplot(data = insurance.dfbetas) +
+  geom_point(mapping = aes(x = obs, y = abs(bmi))) +
+  geom_hline(mapping = aes(yintercept = 1),
+             color = "red", linetype = 2) +
+  geom_hline(mapping = aes(yintercept = 2 / sqrt(length(obs))),
+             color = "red", linetype = 2) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+```
+
+#### Assumption 5 Conclusions:
+
+The DFFits and DFBetas show that there are no observations marked as influential and that all data points are described in the model.
+
+
+#### (R) Assumption 6: No other predictor variables are required.
+
+It looks better of the assumption. The model is more accurately describing the data, and many of assumptions are looking much stronger than when first did this analysis just basing model off of age alone.  However, some of the assumptions are showing trends that suggest that there are further variables that may need to be added in order for the model to reach maximum accuracy.  This assumption is met for now, and I understand that other variables can be worth adding in the future.
+
+
+#### Assumption 7: Test for Multicolinearity.
+```{r}
+#vif
+insurance.vif <- vif(sub.insurance.lm)
+insurance.vif
+```
+
+#### Assumption 7 Conclusions:
+
+This assumption is met.  The VIF test showed each variable as being within .01 of 1. This is awesome because values of 1 show that there is no multicollinearity between variables.  
+
+
+#### Overall Conclusions:
+Additional methods need to apply to potential met the multiple linear regression assumptions. I'll start by applying a transformation to y and seeing if that helps reduce the non-normal patterns and discrepancies in the residuals.
+
+
+## Transformations:
+
+#### Box Cox Analysis
+```{r}
+bc <- boxCox(sub.insurance.lm)
+bc$x[which.max(bc$y)]
+
+#Apply log() transformation to charges
+sub.insurance$log.charges <- log(sub.insurance$charges)
+sub.insurance.lm.trans <- lm(log.charges ~ age + bmi + children + smoker, 
+                             data = sub.insurance)
+summary(sub.insurance.lm.trans)
+
+#Add new residuals to .
+sub.insurance$residuals.trans <- sub.insurance.lm.trans$residuals
+sub.insurance$fitted.values.trans <- sub.insurance.lm.trans$fitted.values
+
+#Create predictor values.
+pred.vals <- seq(min(sub.insurance$age), max(sub.insurance$age), length = 1338)
+preds.trans <- sub.insurance.lm.trans$coefficients[1] + 
+  sub.insurance.lm.trans$coefficients[2] * pred.vals
+preds.orig <- exp(preds.trans)
+preds <- data.frame("pred.vals" = pred.vals, "pred_orig" = preds.orig)
+
+
+
+```
+
+#### Transformation Summary:
+The log transformation is applied to repsonse variable.
+
+## Re-Check Assumptions
+
+#### (L) Assumption 1: X vs. Y is linear (using scatter plots, partial regression plots, residuals vs. fitted values plots, and specific scatter plots that meet certain requirements).
+
+```{r}
+#Scatter plot matrix of continuous variables.
+cont.insurance.trans <- sub.insurance[, c(8, 1, 2)]
+plot(cont.insurance.trans)
+
+#Predictors vs. Residuals
+#Age plot code
+plot.age <- ggplot(data = sub.insurance, 
+                   mapping = aes(x = age, y = residuals.trans)) +
+    geom_point() +
+    theme_bw() +
+    theme(aspect.ratio = 1)
+
+
+#BMI plot code
+plot.bmi <- ggplot(data = sub.insurance, 
+                   mapping = aes(x = bmi, y = residuals.trans)) +
+    geom_point() +
+    theme_bw() +
+    theme(aspect.ratio = 1)
+
+#Children plot code
+plot.children <- ggplot(data = sub.insurance, 
+                        mapping = aes(x = children, y = residuals.trans)) +
+    geom_point() +
+    theme_bw() +
+    theme(aspect.ratio = 1)
+
+#Smoker plot code
+plot.smoker <- ggplot(data = sub.insurance, 
+                      mapping = aes(x = smoker, y = residuals.trans)) +
+    geom_point() +
+    theme_bw() +
+    theme(aspect.ratio = 1)
+
+
+plot.age
+plot.bmi
+plot.children
+plot.smoker
+
+#Residuals vs. fitted values.
+residuals.plot <- autoplot(sub.insurance.lm.trans, 
+                           which = 1, 
+                           ncol = 1, 
+                           nrow = 1) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+residuals.plot
+
+#AvPlots
+avPlots(sub.insurance.lm.trans)
+
+```
+
+#### Assumption 1 Conclusions:
+
+The blue lines on the partial regression plots look linear. Definately see they are seperated into groups, but they are still linear. In the bmi and children plots, there are some random points but overall the lines are linear. Overall, I conclude that the linearity assumption is met. 
+
+
+
+#### (I) Assumption 2: Residuals are independent.
+
+Do not know how the data was collected, so cannot conclusively state that the residuals are independent.  However, my assumption is that the residuals will be independent since the medical conditions and needs of a particular person can't influence the medical conditions and needs of another.
+
+
+
+#### (N) Assumption 3: Residuals are normally distributed and centered at 0.
+```{r}
+prob.plot <- autoplot(sub.insurance.lm.trans, which = 2, ncol = 1, nrow = 1) +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.title = element_text(size = sz))
+
+prob.plot
+
+shapiro.test(sub.insurance.lm.trans$residuals)
+```
+
+#### Assumption 3 Conclusions:
+
+The residuals are behaving better that they were before.  There are still other factors influencing the behavior of our residuals that aren't included in this model. According to the result on the Shapiro-Wilk test, the p-value is less than 0.05, so reject the null hypothesis and conclude that the residuals are not normally distributed. In the QQ plot, half of the data points are way beyond the line, and the top points can be influential points. 
+
+
+
+#### (E) Assumption 4: Residuals have equal variance.
+```{r}
+residuals.plot
+
+grp <- as.factor(c(rep("lower", floor(dim(insurance)[1] / 2)), 
+                   rep("upper", ceiling(dim(insurance)[1] / 2))))
+leveneTest(sub.insurance[order(sub.insurance$age), 
+                         "residuals.trans"]~ grp, center = median)
+```
+
+#### Assumption 4 Conclusions:
+
+The result of Levene's test is significant, that means the residuals does not have equal variance. The line in residuals vs fitted values plot is skewed, and the points around the blue line are spread apart.
+
+
+#### (A) Assumption 5: Model describes ALL observations.
+```{r}
+#DFFits
+insurance.dffits <- data.frame ("dffits" = dffits(sub.insurance.lm.trans))
+insurance.dffits$obs <- 1:length(sub.insurance$age)
+
+ggplot(data = insurance.dffits) +
+  geom_point(mapping = aes(x = obs, y = abs(dffits))) +
+  geom_hline(mapping = aes(yintercept = 1),
+             color = "red", linetype = 2) +
+  geom_hline(mapping = aes(yintercept = 2 * sqrt(6 / length(obs))),
+             color = "red", linetype = 2) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+insurance.dffits[abs(insurance.dffits$dffits) > 1, ]
+
+
+#DFBetas
+insurance.dfbetas <- as.data.frame(dfbetas(sub.insurance.lm.trans))
+insurance.dfbetas$obs <- 1:length(sub.insurance$age)
+
+
+ggplot(data = insurance.dfbetas) +
+  geom_point(mapping = aes(x = obs, y = abs(age))) +
+  geom_hline(mapping = aes(yintercept = 1),
+             color = "red", linetype = 2) +
+  geom_hline(mapping = aes(yintercept = 2 / sqrt(length(obs))),
+             color = "red", linetype = 2) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+ggplot(data = insurance.dfbetas) +
+  geom_point(mapping = aes(x = obs, y = abs(bmi))) +
+  geom_hline(mapping = aes(yintercept = 1),
+             color = "red", linetype = 2) +
+  geom_hline(mapping = aes(yintercept = 2 / sqrt(length(obs))),
+             color = "red", linetype = 2) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+```
+
+#### Assumption 5 Conclusions:
+
+Similiar with before the transformation. The DFFits and DFBetas show that there are no observations marked as influential and that all data points are described in our model.  This is much better where we ran an analysis and saw a couple hundred different points that were marked as influential, because there were predictor variables that were not included.
+
+
+
+#### (R) Assumption 6: No other predictor variables are required.
+
+This time there are no other predictor variables that aren't accounted for.  There are some anomallies that need to be handled through a transformation, so I'll work on transforming the model to improve how well it describes our data.
+
+
+#### Assumption 7: Test for Multicolinearity.
+```{r}
+#vif
+insurance.vif <- vif(sub.insurance.lm.trans)
+insurance.vif
+```
+
+#### Assumption 7 Conclusions:
+
+This assumption is still met. The VIF test showed each variable as being within .01 of 1. This is awesome because values of 1 show that there is no multicolinearity between variables.  
+
+
+#### Overall Conclusions:
+With the transformation, the assumptions are better met, but still are not as good as they could be. The residuals are not normally distributed and they do not have equal variance. The rest of the assumptions are met. 
+
+## Model Evaluations 
+
+#### Confidence Interval and Hypothesis Test for the Slope
+```{r}
+confint(sub.insurance.lm, level = .95)
+
+```
+
+
+#### Confidence Interval of insurance cost for someone who is 40 years old, has a bmi of 32, with 2 children, and smokes. 
+```{r}
+predict(sub.insurance.lm, newdata = data.frame(age = 40, bmi = 32, children = "2", smoker = "yes"), 
+        interval = "confidence", level = 0.95)
+
+```
+
+
+#### Preiction Interval for someone who is 40 years old, has a bmi of 32, with 2 children, and smokes.
+```{r}
+predict(sub.insurance.lm, newdata = data.frame(age = 40, 
+                                               bmi = 32, 
+                                               children = "2", 
+                                               smoker = "yes"), 
+        interval = "prediction", level = 0.95)
+```
+
+
+#### MSE
+```{r}
+anova <- aov(sub.insurance.lm.trans)
+mse <- summary(anova)[[1]][2, 2] / summary(anova)[[1]][2,1]
+mse
+```
+#### RMSE
+```{r}
+sqrt(mse)
+```
+#### MAE
+```{r}
+#fill in variable with own still
+sum(abs(sub.insurance$residuals.trans)) / (length(sub.insurance$charges) -2)
+```
+#### R-Squared
+```{r}
+summary(sub.insurance.lm.trans)$r.squared
+
+```
+#### Adjusted R-Squared
+```{r}
+summary(sub.insurance.lm.trans)$adj.r.squared
+```
+#### F-Statistic
+```{r}
+summary(sub.insurance.lm.trans)
+```
+
+```{r}
+fitted.plot <- ggplot(data = sub.insurance, aes(x = age, 
+                                                    y = log.charges, 
+                                                    color = children,
+                                                    size = smoker)) +
+  geom_point(size = 1) +
+  theme_bw() +
+  geom_smooth(method = "lm", 
+              mapping = aes(y = predict(sub.insurance.lm.trans))) +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        legend.text = element_text(size = sz),
+        legend.title = element_text(size = sz),
+        aspect.ratio = 1)
+fitted.plot
+
+### If you decide the plot looks a little crowded, delete "size = smoker" and replace "color = children" with "color = smoker".  I thought this plot illustrated fairly nicely what our model is able to predict.
+
+```
+
+#### Evaluation Metrics Conclusions:
+
+After all the transformation, the R-squared and adjusted R-square values are all close to 1, which means that a better model is fitted. About 76% of variability in medical charges are explained by the variables after accounting for predictors in the model. The confidence intervals are also very informative. For example, we are 95% confidence that the average medical charges increase between 234.71 and 281.44 dollars, for every additional year in age. According to the F-statistics p-value, I can conclude that at least one variable is useful at predicting overall charges.
+
+
+## Overall Summary & Conclusions:
+
+Understanding how age, gender, bmi, number of children and smoking status characteristics contribute to the person's medical charges can be critical to understand their medial costs and making good decisions about a person's health. I conducted an analysis to determine which of these types of variable significantly affect medical charges. After fitting a multiple linear regression model, that many of predictor variables, do, indeed, have a significant negative impact on medical charges. To meet more assumptions, a transformation is applied to multiple linear regression model, and this has made assumptions better met. The Adjusted R-squared value suggested that about 76% of variability in medical charges are explained by the variables after accounting for predictors in the model. I can definately do more transformation to make model better, but it is better than what I started with.
+
+
+\newpage
+## Apendix: Code
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
+
+
+
+
+
+
+
